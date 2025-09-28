@@ -7,6 +7,7 @@ export interface User {
   role: 'admin' | 'user';
   is_active: boolean;
   created_at: string;
+  avatar_path?: string;
 }
 
 export interface AuthResponse {
@@ -21,6 +22,24 @@ export interface AuthResponse {
 export interface SessionValidation {
   valid: boolean;
   user?: User;
+}
+
+export interface Message {
+  id: number;
+  user_id: number;
+  content: string;
+  message_type: 'text' | 'image' | 'video' | 'audio' | 'file';
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  created_at: string;
+  username: string;
+  avatar_path: string;
+}
+
+export interface MessagesResponse {
+  messages: Message[];
 }
 
 class ApiClient {
@@ -244,6 +263,73 @@ class ApiClient {
     }
   }
 
+  async getMessages(limit: number = 10, offset: number = 0): Promise<MessagesResponse> {
+    try {
+      const result = await this.request(`/messages?limit=${limit}&offset=${offset}`);
+      return result;
+    } catch (error: any) {
+      console.error('Get messages error:', error);
+      throw error;
+    }
+  }
+
+  async sendMessage(messageData: {
+    content: string;
+    message_type: 'text' | 'image' | 'video' | 'audio' | 'file';
+    file?: File;
+  }): Promise<{ success: boolean; message?: Message }> {
+    try {
+      const formData = new FormData();
+      formData.append('content', messageData.content);
+      formData.append('message_type', messageData.message_type);
+      
+      if (messageData.file) {
+        formData.append('file', messageData.file);
+      }
+
+      const result = await fetch(`${API_BASE_URL}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.sessionToken}`,
+        },
+        body: formData,
+      });
+
+      if (!result.ok) {
+        throw new Error(`HTTP error! status: ${result.status}`);
+      }
+
+      return await result.json();
+    } catch (error: any) {
+      console.error('Send message error:', error);
+      throw error;
+    }
+  }
+
+  async uploadAvatar(file: File): Promise<{ success: boolean; avatarPath: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+
+      const result = await fetch(`${API_BASE_URL}/messages/avatar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.sessionToken}`,
+        },
+        body: formData,
+      });
+
+      if (!result.ok) {
+        throw new Error(`HTTP error! status: ${result.status}`);
+      }
+
+      return await result.json();
+    } catch (error: any) {
+      console.error('Upload avatar error:', error);
+      throw error;
+    }
+  }
+
   getCurrentUser(): User | null {
     if (typeof window === 'undefined') return null;
     
@@ -253,6 +339,14 @@ class ApiClient {
 
   isAuthenticated(): boolean {
     return this.sessionToken !== null;
+  }
+
+  getFileUrl(filename: string): string {
+    return `${API_BASE_URL}/messages/file/${filename}`;
+  }
+
+  getAvatarUrl(filename: string): string {
+    return `${API_BASE_URL}/messages/avatar/${filename}`;
   }
 }
 

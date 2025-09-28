@@ -24,6 +24,9 @@ export class AuthService {
         return { success: false, error: 'Неверный пароль' };
       }
 
+      const avatarResult = await db.query('SELECT avatar_path FROM user_avatars WHERE user_id = ?', [user.id]);
+      const avatar_path = avatarResult.length > 0 ? avatarResult[0].avatar_path : null;
+
       const sessionToken = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
@@ -43,7 +46,8 @@ export class AuthService {
           id: user.id,
           username: user.username,
           email: user.email,
-          role: user.role
+          role: user.role,
+          avatar_path: avatar_path
         }
       };
     } catch (error) {
@@ -76,9 +80,10 @@ export class AuthService {
   async validateSession(sessionToken: string): Promise<{ valid: boolean; user?: any }> {
     try {
       const sql = `
-        SELECT s.*, u.username, u.email, u.role, u.is_active 
+        SELECT s.*, u.username, u.email, u.role, u.is_active, ua.avatar_path
         FROM sessions s 
         JOIN users u ON s.user_id = u.id 
+        LEFT JOIN user_avatars ua ON u.id = ua.user_id
         WHERE s.session_token = ? AND s.expires_at > NOW() AND u.is_active = TRUE
       `;
       
@@ -98,7 +103,8 @@ export class AuthService {
           id: session.user_id,
           username: session.username,
           email: session.email,
-          role: session.role
+          role: session.role,
+          avatar_path: session.avatar_path
         }
       };
     } catch (error) {

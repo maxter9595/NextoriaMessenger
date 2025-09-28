@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api';
 import Link from 'next/link';
 
 export default function RegisterPage() {
+  const defaultAvatarUrl = `${process.env.BACKEND_URL}/uploads/avatars/default_avatar.png`;
   const router = useRouter();
   const [formData, setFormData] = useState({
     username: '',
@@ -13,14 +14,41 @@ export default function RegisterPage() {
     password: '',
     confirmPassword: ''
   });
+  const [avatar, setAvatar] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        alert('Пожалуйста, выберите изображение');
+        return;
+      }
+      
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        alert('Размер файла не должен превышать 5MB');
+        return;
+      }
+      
+      setAvatar(file);
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAvatarPreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,12 +75,19 @@ export default function RegisterPage() {
         formData.password
       );
       
-      if (result.success) {
-        if (result.sessionToken) {
-          router.push('/chat');
-        } else {
-          router.push('/login?message=Регистрация успешна! Пожалуйста, войдите.');
+      if (result.success && result.sessionToken) {
+        if (avatar) {
+          try {
+            await apiClient.uploadAvatar(avatar);
+            console.log('✅ Аватар успешно загружен');
+          } catch (avatarError) {
+            console.error('Ошибка загрузки аватара:', avatarError);
+          }
         }
+        
+        router.push('/chat');
+      } else if (result.success) {
+        router.push('/login?message=Регистрация успешна! Пожалуйста, войдите.');
       } else {
         setError(result.error || 'Ошибка регистрации');
       }
@@ -60,6 +95,14 @@ export default function RegisterPage() {
       setError(error.message || 'Ошибка сети');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const removeAvatar = () => {
+    setAvatar(null);
+    setAvatarPreview(null);
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = '';
     }
   };
 
@@ -73,6 +116,88 @@ export default function RegisterPage() {
       boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
     }}>
       <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>Регистрация</h1>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div 
+          onClick={() => avatarInputRef.current?.click()}
+          style={{
+            width: '100px',
+            height: '100px',
+            borderRadius: '50%',
+            backgroundColor: avatarPreview ? 'transparent' : '#0070f3',
+            margin: '0 auto 10px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            fontWeight: 'bold',
+            fontSize: '24px',
+            overflow: 'hidden',
+            border: '2px solid #ddd',
+            backgroundImage: avatarPreview ? 'none' : `url(${defaultAvatarUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+          }}
+        >
+          {avatarPreview ? (
+            <img 
+              src={avatarPreview} 
+              alt="Avatar preview" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            !defaultAvatarUrl && formData.username?.charAt(0).toUpperCase() || ''
+          )}
+        </div>
+        
+        <input
+          type="file"
+          ref={avatarInputRef}
+          style={{ display: 'none' }}
+          accept="image/*"
+          onChange={handleAvatarChange}
+        />
+        
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            style={{
+              padding: '5px 10px',
+              backgroundColor: '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            {avatar ? 'Сменить' : 'Выбрать аватар'}
+          </button>
+          
+          {avatar && (
+            <button
+              type="button"
+              onClick={removeAvatar}
+              style={{
+                padding: '5px 10px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Удалить
+            </button>
+          )}
+        </div>
+        
+        <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+          Необязательно (макс. 5MB)
+        </div>
+      </div>
       
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '15px' }}>

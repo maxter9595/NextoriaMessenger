@@ -1,6 +1,7 @@
 import express from 'express';
 import { authService } from '../services/authService.js';
 import { userService } from '../services/userService.js';
+import { db } from '../database/connection.js';
 
 const router = express.Router();
 
@@ -32,6 +33,12 @@ router.post('/register', async (req, res) => {
       password,
       role: 'user'
     });
+    
+    const defaultAvatarPath = `avatars/default_avatar.png`;
+    await db.query(`
+      INSERT INTO user_avatars (user_id, avatar_path, mime_type, file_size) 
+      VALUES (?, ?, 'image/png', 0)
+    `, [userId, defaultAvatarPath]);
     
     const loginResult = await authService.login(username, password);
     

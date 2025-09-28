@@ -296,7 +296,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Кнопка создания администратора */}
+      {/* Admin creation form */}
       {!showCreateForm && (
         <div style={{ marginBottom: '20px' }}>
           <button 
@@ -315,7 +315,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Сообщения об ошибках */}
+      {/* Error message */}
       {error && (
         <div style={{ 
           color: 'red', 
@@ -329,7 +329,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Форма создания администратора */}
+      {/* Admin creation form */}
       {showCreateForm && (
         <form onSubmit={handleCreateAdmin} style={{ 
           border: '1px solid #ddd', 
@@ -458,7 +458,7 @@ export default function AdminPage() {
         </form>
       )}
 
-      {/* Панель фильтрации */}
+      {/* Filters */}
       <div style={{ 
         border: '1px solid #ddd', 
         padding: '20px', 
@@ -469,7 +469,6 @@ export default function AdminPage() {
         <h3 style={{ marginTop: 0, marginBottom: '15px' }}>Фильтры</h3>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', marginBottom: '15px' }}>
-          {/* Поиск по ID, имени и email */}
           <div>
             <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
               Поиск (ID, Имя, Email)
@@ -488,7 +487,6 @@ export default function AdminPage() {
             />
           </div>
 
-          {/* Фильтр по роли */}
           <div>
             <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
               Роль
@@ -509,7 +507,6 @@ export default function AdminPage() {
             </select>
           </div>
 
-          {/* Фильтр по статусу */}
           <div>
             <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
               Статус
@@ -552,7 +549,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Таблица пользователей */}
+      {/* Users Table */}
       <div>
         <div style={{ marginBottom: '20px' }}>
           <h3>Управление пользователями</h3>

@@ -68,7 +68,7 @@ async function createDatabase() {
     console.log('🗃️ Creating database and tables...');
     await connection.query(schema);
     console.log('✅ База данных и таблицы созданы успешно');
-
+    
     await connection.end();
     console.log('✅ Скрипт завершен успешно');
     

@@ -40,6 +40,34 @@ CREATE TABLE IF NOT EXISTS user_activity_log (
     INDEX idx_created_at (created_at)
 );
 
+CREATE TABLE IF NOT EXISTS messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    content TEXT,
+    message_type ENUM('text', 'image', 'video', 'audio', 'file') DEFAULT 'text',
+    file_path VARCHAR(500),
+    file_name VARCHAR(255),
+    file_size INT,
+    mime_type VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_created_at (created_at),
+    INDEX idx_message_type (message_type)
+);
+
+CREATE TABLE IF NOT EXISTS user_avatars (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL UNIQUE,
+    avatar_path VARCHAR(500) NOT NULL,
+    mime_type VARCHAR(100),
+    file_size INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id)
+);
+
 CREATE INDEX idx_user_activity_action ON user_activity_log(action);
 CREATE INDEX idx_user_activity_created_at ON user_activity_log(created_at);
 CREATE INDEX idx_user_activity_user_action ON user_activity_log(user_id, action);

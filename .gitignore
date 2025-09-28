@@ -11,6 +11,11 @@ media/
 venv/
 .venv/
 
+# uploads
+uploads/
+uploads/*
+!/uploads/.gitkeep
+
 # Build and documentation
 dist/
 doc/
