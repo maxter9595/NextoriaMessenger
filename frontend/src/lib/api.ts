@@ -28,7 +28,7 @@ export interface Message {
   id: number;
   user_id: number;
   content: string;
-  message_type: 'text' | 'image' | 'video' | 'audio' | 'file';
+  message_type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'code';
   file_path: string;
   file_name: string;
   file_size: number;
@@ -40,6 +40,13 @@ export interface Message {
 
 export interface MessagesResponse {
   messages: Message[];
+}
+
+export interface SendMessageData {
+  content: string;
+  message_type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'code';
+  file?: File;
+  language?: string;
 }
 
 class ApiClient {
@@ -273,15 +280,28 @@ class ApiClient {
     }
   }
 
-  async sendMessage(messageData: {
-    content: string;
-    message_type: 'text' | 'image' | 'video' | 'audio' | 'file';
-    file?: File;
-  }): Promise<{ success: boolean; message?: Message }> {
+  async sendMessage(messageData: SendMessageData): Promise<{ success: boolean; message?: Message }> {
     try {
       const formData = new FormData();
       formData.append('content', messageData.content);
-      formData.append('message_type', messageData.message_type);
+      
+      let actualMessageType = messageData.message_type;
+      if (actualMessageType === 'text') {
+        actualMessageType = messageData.content.includes('```') ? 'code' : 'text';
+      }
+      
+      formData.append('message_type', actualMessageType);
+      
+      console.log('📤 Sending message:', {
+        content_length: messageData.content.length,
+        original_type: messageData.message_type,
+        actual_type: actualMessageType,
+        content_preview: messageData.content.substring(0, 100)
+      });
+      
+      if (messageData.language) {
+        formData.append('language', messageData.language);
+      }
       
       if (messageData.file) {
         formData.append('file', messageData.file);
@@ -296,6 +316,8 @@ class ApiClient {
       });
 
       if (!result.ok) {
+        const errorText = await result.text();
+        console.error('❌ Send message failed:', errorText);
         throw new Error(`HTTP error! status: ${result.status}`);
       }
 
@@ -305,7 +327,7 @@ class ApiClient {
       throw error;
     }
   }
-
+    
   async uploadAvatar(file: File): Promise<{ success: boolean; avatarPath: string }> {
     try {
       const formData = new FormData();
@@ -326,6 +348,31 @@ class ApiClient {
       return await result.json();
     } catch (error: any) {
       console.error('Upload avatar error:', error);
+      throw error;
+    }
+  }
+
+  async updateMessage(messageId: number, content: string): Promise<{ success: boolean; message?: Message }> {
+    try {
+      const result = await this.request(`/messages/${messageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content }),
+      });
+      return result;
+    } catch (error: any) {
+      console.error('Update message error:', error);
+      throw error;
+    }
+  }
+
+  async deleteMessage(messageId: number): Promise<{ success: boolean }> {
+    try {
+      const result = await this.request(`/messages/${messageId}`, {
+        method: 'DELETE',
+      });
+      return result;
+    } catch (error: any) {
+      console.error('Delete message error:', error);
       throw error;
     }
   }

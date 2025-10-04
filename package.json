@@ -10,27 +10,7 @@
     "start:backend": "cd backend && npm run start",
     "start:frontend": "cd frontend && npm run start",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
-    "setup:db": "cd backend && npm run setup",
-    "create-admin": "cd backend && npm run create-admin",
-    "create-user": "cd backend && npm run create-user",
-    "create-db": "cd backend && npm run create-db"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.0"
-  }
-}{
-  "name": "my-messenger",
-  "version": "1.0.0",
-  "scripts": {
-    "dev:backend": "cd backend && npm run dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "build:backend": "cd backend && npm run build",
-    "build:frontend": "cd frontend && npm run build",
-    "start:backend": "cd backend && npm run start",
-    "start:frontend": "cd frontend && npm run start",
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
-    "setup:db": "cd backend && npm run setup",
+    "setup": "cd backend && npm run setup",
     "create-admin": "cd backend && npm run create-admin",
     "create-user": "cd backend && npm run create-user",
     "create-db": "cd backend && npm run create-db"

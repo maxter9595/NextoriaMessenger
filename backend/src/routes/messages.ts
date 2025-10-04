@@ -56,8 +56,15 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.post('/', requireAuth, upload.single('file'), async (req, res) => {
   try {
-    const { content, message_type } = req.body;
+    const { content, message_type, language } = req.body;
     const user = req.user;
+    
+    console.log('📨 Received message data:', {
+      content_length: content?.length,
+      message_type,
+      language,
+      has_file: !!req.file
+    });
     
     if (!content && !req.file) {
       return res.status(400).json({ error: 'Content or file required' });
@@ -87,20 +94,23 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
       messageService.getFileType(req.file.mimetype) : 
       (message_type || 'text');
     
+    const messageContent = content || (req.file ? req.file.originalname : '');
+    
     const messageId = await messageService.createMessage({
       user_id: user.id,
-      content: content || (req.file ? req.file.originalname : ''),
+      content: messageContent,
       message_type: actualMessageType,
+      language: language || null,
       file_path: filePath,
       file_name: req.file ? Buffer.from(req.file.originalname, 'binary').toString('utf8') : fileName,
-      file_size: fileSize,
+      file_size: fileSize || 0,
       mime_type: mimeType
     });
     
     const message = await messageService.getMessageById(messageId);
     res.json({ success: true, message });
   } catch (error: any) {
-    console.error('Create message error:', error);
+    console.error('❌ Create message error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -177,6 +187,56 @@ router.get('/avatar/*', async (req, res) => {
   } catch (error: any) {
     console.error('❌ Avatar not found:', req.params[0], error);
     res.status(404).json({ error: 'Avatar not found' });
+  }
+});
+
+router.patch('/:id', requireAuth, async (req, res) => {
+  try {
+    const messageId = parseInt(req.params.id);
+    const { content, message_type } = req.body;
+    const user = req.user;
+
+    if (!content && !message_type) {
+      return res.status(400).json({ error: 'Content or message_type required' });
+    }
+
+    const canEdit = await messageService.canEditMessage(messageId, user.id);
+    if (!canEdit) {
+      return res.status(403).json({ error: 'You can only edit your own messages' });
+    }
+
+    const success = await messageService.updateMessage(messageId, {
+      content,
+      message_type
+    });
+
+    if (success) {
+      const updatedMessage = await messageService.getMessageById(messageId);
+      res.json({ success: true, message: updatedMessage });
+    } else {
+      res.status(404).json({ error: 'Message not found' });
+    }
+  } catch (error: any) {
+    console.error('Update message error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const messageId = parseInt(req.params.id);
+    const user = req.user;
+
+    const canEdit = await messageService.canEditMessage(messageId, user.id);
+    if (!canEdit) {
+      return res.status(403).json({ error: 'You can only delete your own messages' });
+    }
+
+    const success = await messageService.deleteMessage(messageId);
+    res.json({ success });
+  } catch (error: any) {
+    console.error('Delete message error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

@@ -11,19 +11,37 @@ const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
 
 export class MessageService {
   async createMessage(messageData: CreateMessageData): Promise<number> {
+    let content = messageData.content || '';
+    
+    if (messageData.file_path && !messageData.content) {
+      content = messageData.file_name || 'Файл';
+    }
+    
     const sql = `
-      INSERT INTO messages (user_id, content, message_type, file_path, file_name, file_size, mime_type) 
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (user_id, content, message_type, language, file_path, file_name, file_size, mime_type) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
     try {
+      console.log('🔍 Creating message with data:', {
+        user_id: messageData.user_id,
+        content_length: content.length,
+        message_type: messageData.message_type,
+        language: messageData.language || null,
+        file_path: messageData.file_path,
+        file_name: messageData.file_name,
+        file_size: messageData.file_size,
+        mime_type: messageData.mime_type
+      });
+      
       const result = await db.query(sql, [
         messageData.user_id,
-        messageData.content,
+        content,
         messageData.message_type,
+        messageData.language || null,
         messageData.file_path || null,
         messageData.file_name || null,
-        messageData.file_size || null,
+        messageData.file_size || 0,
         messageData.mime_type || null
       ]);
       
@@ -35,11 +53,12 @@ export class MessageService {
       
       return result.insertId;
     } catch (error: any) {
+      console.error('❌ Database error in createMessage:', error);
       await authService.logSystemActivity('message_creation_failed', error.message);
       throw error;
     }
   }
-
+        
   async getMessages(limit: number = 10, offset: number = 0): Promise<any[]> {
     try {
       const limitNum = Math.max(1, Math.min(100, parseInt(limit.toString(), 10)));
@@ -61,7 +80,15 @@ export class MessageService {
       const messages = await db.query(sql);
       console.log('✅ Messages retrieved:', messages.length);
       
-      return messages.reverse();
+      const processedMessages = messages.map(message => ({
+        ...message,
+        is_edited: message.is_edited === 1 || message.is_edited === true,
+        file_size: message.file_size || 0,
+        user_id: Number(message.user_id),
+        id: Number(message.id)
+      }));
+      
+      return processedMessages.reverse();
     } catch (error) {
       console.error('❌ Error in getMessages:', error);
       throw error;
@@ -77,9 +104,21 @@ export class MessageService {
       WHERE m.id = ?
     `;
     const messages = await db.query(sql, [id]);
-    return messages.length > 0 ? messages[0] : null;
+    
+    if (messages.length > 0) {
+      const message = messages[0];
+      return {
+        ...message,
+        is_edited: message.is_edited === 1 || message.is_edited === true,
+        file_size: message.file_size || 0,
+        user_id: Number(message.user_id),
+        id: Number(message.id)
+      };
+    }
+    
+    return null;
   }
-
+  
   async saveFile(file: any, userId: number, fileType: string): Promise<string> {
     await fs.mkdir(uploadsDir, { recursive: true });
     
@@ -204,6 +243,83 @@ export class MessageService {
       size: stats.size,
       mimeType
     };
+  }
+
+  async updateMessage(id: number, messageData: UpdateMessageData): Promise<boolean> {
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (messageData.content !== undefined) {
+      updates.push('content = ?');
+      params.push(messageData.content);
+    }
+    if (messageData.message_type !== undefined) {
+      updates.push('message_type = ?');
+      params.push(messageData.message_type);
+    }
+    updates.push('is_edited = TRUE');
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+
+    if (updates.length === 0) return false;
+
+    const sql = `UPDATE messages SET ${updates.join(', ')} WHERE id = ?`;
+    params.push(id);
+
+    try {
+      const result = await db.query(sql, params);
+      
+      if (result.affectedRows > 0) {
+        await authService.logUserActivity(
+          (await this.getMessageById(id))?.user_id, 
+          'message_updated', 
+          `Сообщение ${id} обновлено, тип: ${messageData.message_type}`
+        );
+      }
+      
+      return result.affectedRows > 0;
+    } catch (error: any) {
+      await authService.logSystemActivity('message_update_failed', error.message);
+      throw error;
+    }
+  }
+  
+  async deleteMessage(id: number): Promise<boolean> {
+    try {
+      const message = await this.getMessageById(id);
+      const sql = 'DELETE FROM messages WHERE id = ?';
+      const result = await db.query(sql, [id]);
+      
+      if (result.affectedRows > 0 && message) {
+        await authService.logUserActivity(
+          message.user_id, 
+          'message_deleted', 
+          `Сообщение ${id} удалено`
+        );
+        
+        if (message.file_path) {
+          try {
+            const filePath = path.join(uploadsDir, message.file_path);
+            await fs.unlink(filePath);
+          } catch (fileError) {
+            console.error('Error deleting file:', fileError);
+          }
+        }
+      }
+      
+      return result.affectedRows > 0;
+    } catch (error: any) {
+      await authService.logSystemActivity('message_deletion_failed', error.message);
+      throw error;
+    }
+  }
+
+  async canEditMessage(messageId: number, userId: number): Promise<boolean> {
+    try {
+      const message = await this.getMessageById(messageId);
+      return message?.user_id === userId;
+    } catch (error) {
+      return false;
+    }
   }
 }
 

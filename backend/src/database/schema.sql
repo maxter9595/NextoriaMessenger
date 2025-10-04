@@ -43,17 +43,23 @@ CREATE TABLE IF NOT EXISTS user_activity_log (
 CREATE TABLE IF NOT EXISTS messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    content TEXT,
-    message_type ENUM('text', 'image', 'video', 'audio', 'file') DEFAULT 'text',
+    content LONGTEXT,
+    message_type ENUM('text', 'image', 'video', 'audio', 'file', 'code') DEFAULT 'text',
+    language VARCHAR(50) NULL, -- Добавляем поле для языка программирования
     file_path VARCHAR(500),
     file_name VARCHAR(255),
     file_size INT,
     mime_type VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_edited BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id),
     INDEX idx_created_at (created_at),
-    INDEX idx_message_type (message_type)
+    INDEX idx_message_type (message_type),
+    INDEX idx_messages_updated (updated_at),
+    INDEX idx_messages_edited (is_edited),
+    INDEX idx_language (language) -- Добавляем индекс для языка
 );
 
 CREATE TABLE IF NOT EXISTS user_avatars (

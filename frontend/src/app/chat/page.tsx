@@ -4,6 +4,13 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient, Message } from '@/lib/api';
 import EmojiPicker from '@/components/EmojiPicker';
+import CodeEditor from '@/components/CodeEditor';
+import MessageActions from '@/components/MessageActions';
+import MessageEditor from '@/components/MessageEditor';
+import CodeBlock from '@/components/CodeBlock';
+
+const SCROLL_THRESHOLD = 100;
+const SCROLL_BUFFER = 50;
 
 interface RecordingState {
   isRecording: boolean;
@@ -32,6 +39,24 @@ export default function ChatPage() {
   const [showRecordingPreview, setShowRecordingPreview] = useState(false);
   const [recordingType, setRecordingType] = useState<'audio' | 'video' | null>(null);
 
+  const [showCodeEditor, setShowCodeEditor] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [messageActions, setMessageActions] = useState<{
+    messageId: number;
+    isOwnMessage: boolean;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [fileWithText, setFileWithText] = useState<{
+    file: File;
+    text: string;
+    messageType: 'image' | 'video' | 'audio' | 'file';
+  } | null>(null);
+  const [editingFileMessage, setEditingFileMessage] = useState<{
+    messageId: number;
+    currentText: string;
+    fileInfo: any;
+  } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +68,184 @@ export default function ChatPage() {
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement>(null);
   const recordingStateRef = useRef<RecordingState | null>(null);
+
+  const handleMessageDoubleClick = (message: Message, event: React.MouseEvent) => {
+    const isOwnMessage = message.user_id === user?.id;
+    
+    if (isOwnMessage) {
+      if (message.message_type !== 'text' && message.message_type !== 'code') {
+        setEditingFileMessage({
+          messageId: message.id,
+          currentText: message.content !== message.file_name ? message.content : '',
+          fileInfo: message
+        });
+      } else {
+        setMessageActions({
+          messageId: message.id,
+          isOwnMessage,
+          position: { x: event.clientX, y: event.clientY }
+        });
+      }
+    }
+  };
+
+  const handleEditMessage = async (messageId: number, newContent: string) => {
+    try {
+      const hasCodeBlocks = newContent.includes('```');
+      const messageType = hasCodeBlocks ? 'code' : 'text';
+      
+      console.log('✏️ Editing message:', {
+        messageId,
+        content_length: newContent.length,
+        message_type: messageType,
+        has_code_blocks: hasCodeBlocks
+      });
+
+      const response = await fetch(`/api/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({ 
+          content: newContent,
+          message_type: messageType
+        })
+      });
+
+      if (response.ok) {
+        await loadMessages();
+        setEditingMessage(null);
+      } else {
+        throw new Error('Failed to update message');
+      }
+    } catch (error) {
+      console.error('Error editing message:', error);
+      alert('Ошибка при редактировании сообщения');
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: number) => {
+    if (!confirm('Вы уверены, что хотите удалить это сообщение?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/messages/${messageId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        }
+      });
+
+      if (response.ok) {
+        await loadMessages();
+        setMessageActions(null);
+      } else {
+        throw new Error('Failed to delete message');
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      alert('Ошибка при удалении сообщения');
+    }
+  };
+
+  const handleCodeSubmit = (formattedCode: string) => {
+    setNewMessage(prev => prev + (prev ? '\n\n' : '') + formattedCode);
+    setShowCodeEditor(false);
+  };
+
+  const handleFileUploadWithText = (file: File, text: string = '') => {
+    let messageType: 'image' | 'video' | 'audio' | 'file' = 'file';
+    
+    if (file.type.startsWith('image/')) messageType = 'image';
+    else if (file.type.startsWith('video/')) messageType = 'video';
+    else if (file.type.startsWith('audio/')) messageType = 'audio';
+
+    setFileWithText({
+      file,
+      text,
+      messageType
+    });
+  };
+
+  const handleFileWithTextSubmit = async () => {
+    if (!fileWithText) return;
+
+    try {
+      const content = fileWithText.text.trim() === '' 
+        ? fileWithText.file.name 
+        : fileWithText.text;
+
+      console.log('📤 Sending file with text:', {
+        file: fileWithText.file.name,
+        content: content,
+        content_length: content.length,
+        has_custom_text: fileWithText.text.trim() !== ''
+      });
+
+      await apiClient.sendMessage({
+        content: content,
+        message_type: fileWithText.messageType,
+        file: fileWithText.file
+      });
+
+      setFileWithText(null);
+      await loadMessages();
+    } catch (error) {
+      console.error('❌ Error sending file with text:', error);
+      alert('Ошибка при отправке файла с текстом');
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    try {
+      let messageType: 'image' | 'video' | 'audio' | 'file' = 'file';
+      
+      if (file.type.startsWith('image/')) messageType = 'image';
+      else if (file.type.startsWith('video/')) messageType = 'video';
+      else if (file.type.startsWith('audio/')) messageType = 'audio';
+
+      handleFileUploadWithText(file, '');
+      
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Ошибка при загрузке файла');
+    }
+  };
+
+  const handleEditFileMessage = async (messageId: number, newText: string) => {
+    try {
+      const content = newText.trim() === '' 
+        ? editingFileMessage?.fileInfo.file_name || 'Файл'
+        : newText;
+
+      console.log('✏️ Editing file message:', {
+        messageId,
+        newContent: content,
+        has_custom_text: newText.trim() !== ''
+      });
+
+      const response = await fetch(`/api/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({ content: content })
+      });
+
+      if (response.ok) {
+        await loadMessages();
+        setEditingFileMessage(null);
+      } else {
+        throw new Error('Failed to update message');
+      }
+    } catch (error) {
+      console.error('❌ Error editing file message:', error);
+      alert('Ошибка при редактировании сообщения');
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,6 +259,8 @@ export default function ChatPage() {
         const container = messagesContainerRef.current;
         if (container) {
           const previousHeight = container.scrollHeight;
+          const currentScrollTop = container.scrollTop;
+          
           saveScrollPosition();
           
           const currentOffset = offset + 10;
@@ -66,10 +271,10 @@ export default function ChatPage() {
             setOffset(currentOffset);
             setHasMore(response.messages.length === 10);
             
-            setTimeout(() => {
+            requestAnimationFrame(() => {
               restoreScrollPosition(previousHeight);
               setLoadingMore(false);
-            }, 0);
+            });
           } else {
             setLoadingMore(false);
           }
@@ -92,6 +297,39 @@ export default function ChatPage() {
       setLoadingMore(false);
     }
   };
+
+  const calculateScrollPosition = (messageId: number) => {
+    const container = messagesContainerRef.current;
+    if (!container) return 0;
+    
+    const messageElement = container.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageElement) {
+      const messageRect = messageElement.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      return messageRect.top - containerRect.top + container.scrollTop;
+    }
+    
+    return 0;
+  };
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      const saved = sessionStorage.getItem('scrollPosition');
+      if (saved) {
+        const { top, height } = JSON.parse(saved);
+        const heightDiff = container.scrollHeight - height;
+        if (Math.abs(heightDiff) > 10) {
+          container.scrollTop = top + heightDiff;
+        }
+      }
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -151,26 +389,6 @@ export default function ChatPage() {
       await loadMessages();
     } catch (error) {
       console.error('Error sending message:', error);
-    }
-  };
-
-  const handleFileUpload = async (file: File) => {
-    try {
-      let messageType: 'image' | 'video' | 'audio' | 'file' = 'file';
-      
-      if (file.type.startsWith('image/')) messageType = 'image';
-      else if (file.type.startsWith('video/')) messageType = 'video';
-      else if (file.type.startsWith('audio/')) messageType = 'audio';
-
-      await apiClient.sendMessage({
-        content: file.name,
-        message_type: messageType,
-        file: file
-      });
-      
-      await loadMessages();
-    } catch (error) {
-      console.error('Error uploading file:', error);
     }
   };
 
@@ -384,7 +602,6 @@ export default function ChatPage() {
         
         const timerSpan = document.createElement('span');
         timerSpan.id = 'audio-timer';
-        timerSpan.textContent = '00:00';
         
         header.innerHTML = '🎤 Запись аудио';
         header.appendChild(timerSpan);
@@ -541,17 +758,6 @@ export default function ChatPage() {
     }
   };
 
-  const stopPreview = () => {
-    if (videoPreviewRef.current) {
-      videoPreviewRef.current.srcObject = null;
-    }
-    
-    const audioPreview = document.getElementById('audio-preview-container');
-    if (audioPreview) {
-      audioPreview.innerHTML = '';
-    }
-  };
-
   const togglePauseRecording = () => {
     if (!mediaRecorderRef.current || !recording) return;
 
@@ -633,17 +839,29 @@ export default function ChatPage() {
     setIsDragging(false);
     
     const files = Array.from(e.dataTransfer.files);
-    files.forEach(file => handleFileUpload(file));
+    files.forEach(file => {
+      handleFileUploadWithText(file, '');
+    });
   };
-
+  
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget;
-    const scrollThreshold = 100;
     
-    if (container.scrollTop <= scrollThreshold && 
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    const currentScrollInfo = {
+      scrollTop,
+      scrollHeight,
+      clientHeight,
+      timestamp: Date.now()
+    };
+    sessionStorage.setItem('currentScrollInfo', JSON.stringify(currentScrollInfo));
+    
+    if (scrollTop <= SCROLL_THRESHOLD && 
         !loadingMore && 
-        hasMore && 
-        !isNearBottom(container)) {
+        hasMore) {
       loadMessages(true);
     }
   }, [loadingMore, hasMore, loadMessages]);
@@ -656,9 +874,12 @@ export default function ChatPage() {
   const saveScrollPosition = () => {
     const container = messagesContainerRef.current;
     if (container) {
+      const currentMessage = messages[0];
       const scrollPosition = {
         top: container.scrollTop,
-        height: container.scrollHeight
+        height: container.scrollHeight,
+        firstMessageId: currentMessage?.id,
+        timestamp: Date.now()
       };
       sessionStorage.setItem('scrollPosition', JSON.stringify(scrollPosition));
     }
@@ -666,15 +887,40 @@ export default function ChatPage() {
 
   const restoreScrollPosition = (previousHeight: number) => {
     const container = messagesContainerRef.current;
-    if (container) {
-      const saved = sessionStorage.getItem('scrollPosition');
-      if (saved) {
-        const { top, height } = JSON.parse(saved);
-        const heightDiff = container.scrollHeight - previousHeight;
-        container.scrollTop = top + heightDiff;
+    if (!container) return;
+
+    const saved = sessionStorage.getItem('scrollPosition');
+    if (saved) {
+      const { top, height, firstMessageId } = JSON.parse(saved);
+      const heightDiff = container.scrollHeight - previousHeight;
+      
+      let newScrollTop = top + heightDiff;
+      
+      if (firstMessageId) {
+        setTimeout(() => {
+          const targetElement = container.querySelector(`[data-message-id="${firstMessageId}"]`);
+          if (targetElement) {
+            const targetRect = targetElement.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const targetPosition = targetRect.top - containerRect.top + container.scrollTop;
+            
+            if (targetPosition > 0) {
+              newScrollTop = targetPosition - 50;
+            }
+          }
+          
+          container.scrollTo({
+            top: newScrollTop,
+            behavior: 'auto'
+          });
+        }, 0);
+      } else {
+        container.scrollTop = newScrollTop;
       }
-      sessionStorage.removeItem('scrollPosition');
     }
+    
+    sessionStorage.removeItem('scrollPosition');
+    sessionStorage.removeItem('currentScrollInfo');
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -685,11 +931,38 @@ export default function ChatPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const renderMessageContent = (message: Message) => {
-    const isLink = /https?:\/\/[^\s]+/.test(message.content);
+const renderMessageContent = (message: Message) => {
+    console.log('🔍 Rendering message:', {
+      id: message.id,
+      message_type: message.message_type,
+      content: message.content,
+      has_code_blocks: message.content.includes('```')
+    });
+
+    const shouldRenderAsCode = message.message_type === 'code' || message.content.includes('```');
+    console.log('🔍 Should render as code:', shouldRenderAsCode);
     
-    if (message.message_type === 'text') {
-      if (isLink) {
+    if (shouldRenderAsCode) {
+      console.log('🔍 Rendering as code block');
+      return (
+        <div style={{ margin: '10px 0' }}> {/* Уменьшаем отступы */}
+          <CodeBlock content={message.content} />
+          
+          {message.is_edited && (
+            <div style={{
+              fontSize: '10px',
+              color: '#666',
+              fontStyle: 'italic'
+            }}>
+              (ред.)
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const isLink = /https?:\/\/[^\s]+/.test(message.content);
+    if (isLink) {
         const parts = message.content.split(/(https?:\/\/[^\s]+)/g);
         return (
           <div>
@@ -700,18 +973,55 @@ export default function ChatPage() {
                   href={part} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  style={{ color: '#0070f3', textDecoration: 'underline' }}
+                  style={{ 
+                    color: '#ffffffff', 
+                    textDecoration: 'underline',
+                    wordBreak: 'break-all'
+                  }}
                 >
                   {part}
                 </a>
               ) : (
-                part
+                <span key={index} style={{ wordBreak: 'break-word' }}>{part}</span>
               )
+            )}
+            {message.is_edited && (
+              <div style={{
+                fontSize: '10px',
+                color: '#666',
+                marginTop: '5px',
+                fontStyle: 'italic'
+              }}>
+                (ред.)
+              </div>
             )}
           </div>
         );
       }
-      return <div>{message.content}</div>;
+
+    if (message.message_type === 'text') {
+      return (
+        <div>
+          <div style={{ 
+            wordBreak: 'break-word', 
+            overflowWrap: 'break-word',
+            whiteSpace: 'pre-wrap',
+            lineHeight: '1'
+          }}>
+            {message.content}
+          </div>
+          {message.is_edited && (
+            <div style={{
+              fontSize: '10px',
+              color: '#666',
+              marginTop: '5px',
+              fontStyle: 'italic'
+            }}>
+              (ред.)
+            </div>
+          )}
+        </div>
+      );
     }
 
     if (message.message_type === 'image') {
@@ -722,8 +1032,25 @@ export default function ChatPage() {
             alt={message.file_name}
             style={{ maxWidth: '300px', maxHeight: '300px', borderRadius: '8px' }}
           />
+          {/* Текст под изображением - показываем только если отличается от имени файла и не пустой */}
+          {message.content && message.content !== message.file_name && message.content.trim() !== '' && (
+            <div style={{ 
+              fontSize: '14px', 
+              color: message.user_id === user?.id ? 'rgba(255,255,255,0.9)' : '#333',
+              marginTop: '8px',
+              padding: '8px 12px',
+              backgroundColor: message.user_id === user?.id ? 'rgba(255,255,255,0.1)' : '#f5f5f5',
+              borderRadius: '6px',
+              wordBreak: 'break-word'
+            }}>
+              {message.content}
+            </div>
+          )}
           <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
             {message.file_name} ({formatFileSize(message.file_size)})
+            {message.is_edited && (
+              <span style={{fontStyle: 'italic', marginLeft: '5px'}}>(ред.)</span>
+            )}
           </div>
         </div>
       );
@@ -738,8 +1065,24 @@ export default function ChatPage() {
           >
             <source src={apiClient.getFileUrl(message.file_path)} type={message.mime_type} />
           </video>
+          {/* Текст под видео */}
+          {message.content && message.content !== message.file_name && (
+            <div style={{ 
+              fontSize: '14px', 
+              color: message.user_id === user?.id ? 'rgba(255,255,255,0.9)' : '#333',
+              marginTop: '8px',
+              padding: '8px 12px',
+              backgroundColor: message.user_id === user?.id ? 'rgba(255,255,255,0.1)' : '#f5f5f5',
+              borderRadius: '6px',
+              wordBreak: 'break-word'
+            }}>
+              {message.content}
+            </div>
+          )}
           <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-            {message.file_name} ({formatFileSize(message.file_size)})
+            {message.is_edited && (
+              <span style={{fontStyle: 'italic', marginLeft: '5px'}}>(ред.)</span>
+            )}
           </div>
         </div>
       );
@@ -751,8 +1094,25 @@ export default function ChatPage() {
           <audio controls style={{ width: '300px' }}>
             <source src={apiClient.getFileUrl(message.file_path)} type={message.mime_type} />
           </audio>
+          {/* Текст под аудио */}
+          {message.content && message.content !== message.file_name && (
+            <div style={{ 
+              fontSize: '14px', 
+              color: message.user_id === user?.id ? 'rgba(255,255,255,0.9)' : '#333',
+              marginTop: '8px',
+              padding: '8px 12px',
+              backgroundColor: message.user_id === user?.id ? 'rgba(255,255,255,0.1)' : '#f5f5f5',
+              borderRadius: '6px',
+              wordBreak: 'break-word'
+            }}>
+              {message.content}
+            </div>
+          )}
           <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
             {message.file_name} ({formatFileSize(message.file_size)})
+            {message.is_edited && (
+              <span style={{fontStyle: 'italic', marginLeft: '5px'}}>(ред.)</span>
+            )}
           </div>
         </div>
       );
@@ -774,18 +1134,33 @@ export default function ChatPage() {
               color: '#333',
               border: '1px solid #ddd'
             }}
-            onClick={(e) => {
-              if (message.mime_type && 
-                  !message.mime_type.startsWith('image/') &&
-                  !message.mime_type.startsWith('video/') &&
-                  !message.mime_type.startsWith('audio/')) {
-                e.preventDefault();
-                window.open(apiClient.getFileUrl(message.file_path), '_blank');
-              }
-            }}
           >
             📎 {message.file_name} ({formatFileSize(message.file_size)})
           </a>
+          {/* Текст под файлом */}
+          {message.content && message.content !== message.file_name && (
+            <div style={{ 
+              fontSize: '14px', 
+              color: message.user_id === user?.id ? 'rgba(255,255,255,0.9)' : '#333',
+              marginTop: '8px',
+              padding: '8px 12px',
+              backgroundColor: message.user_id === user?.id ? 'rgba(255,255,255,0.1)' : '#f5f5f5',
+              borderRadius: '6px',
+              wordBreak: 'break-word'
+            }}>
+              {message.content}
+            </div>
+          )}
+          {message.is_edited && (
+            <div style={{
+              fontSize: '10px',
+              color: '#666',
+              marginTop: '5px',
+              fontStyle: 'italic'
+            }}>
+              (ред.)
+            </div>
+          )}
         </div>
       );
     }
@@ -1108,6 +1483,7 @@ export default function ChatPage() {
         {messages.map((message) => (
           <div 
             key={message.id}
+            data-message-id={message.id}
             style={{ 
               marginBottom: '15px',
               display: 'flex',
@@ -1115,7 +1491,9 @@ export default function ChatPage() {
               alignItems: 'flex-start',
               gap: '10px'
             }}
+            onDoubleClick={(e) => handleMessageDoubleClick(message, e)}
           >
+            
             {/* Avatar */}
             <div style={{ flexShrink: 0 }}>
               {message.avatar_path ? (
@@ -1183,6 +1561,282 @@ export default function ChatPage() {
         
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Code Editor Modal */}
+      {showCodeEditor && (
+        <CodeEditor
+          onCodeSubmit={handleCodeSubmit}
+          onCancel={() => setShowCodeEditor(false)}
+        />
+      )}
+
+      {/* Message Actions Menu */}
+      {messageActions && (
+        <MessageActions
+          messageId={messageActions.messageId}
+          isOwnMessage={messageActions.isOwnMessage}
+          onEdit={() => {
+            const message = messages.find(m => m.id === messageActions.messageId);
+            if (message) {
+              setEditingMessage(message);
+              setMessageActions(null);
+            }
+          }}
+          onDelete={() => handleDeleteMessage(messageActions.messageId)}
+          onClose={() => setMessageActions(null)}
+          position={messageActions.position}
+        />
+      )}
+
+      {/* Message Editor Modal */}
+      {editingMessage && (
+        <MessageEditor
+          message={editingMessage}
+          onSave={(content) => handleEditMessage(editingMessage.id, content)}
+          onCancel={() => setEditingMessage(null)}
+        />
+      )}
+
+      {/* File with Text Modal */}
+      {fileWithText && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0' }}>
+              {fileWithText.messageType === 'audio' ? 'Добавьте описание к аудиозаписи' :
+              fileWithText.messageType === 'video' ? 'Добавьте описание к видео' :
+              fileWithText.messageType === 'image' ? 'Добавьте описание к изображению' :
+              'Добавьте описание к файлу'}
+            </h3>
+            
+            <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px' }}>
+              <div><strong>Файл:</strong> {fileWithText.file.name}</div>
+              <div><strong>Тип:</strong> {
+                fileWithText.messageType === 'image' ? '🖼️ Изображение' :
+                fileWithText.messageType === 'video' ? '🎥 Видео' :
+                fileWithText.messageType === 'audio' ? '🎵 Аудио' : '📎 Файл'
+              }</div>
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                💡 Описание необязательно. Если оставить пустым, будет показано только имя файла.
+              </div>
+            </div>
+            
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Описание {fileWithText.messageType === 'audio' || fileWithText.messageType === 'video' ? 'записи' : 'файла'}:
+              </label>
+              <textarea
+                value={fileWithText.text}
+                onChange={(e) => setFileWithText(prev => prev ? { ...prev, text: e.target.value } : null)}
+                placeholder={
+                  fileWithText.messageType === 'audio' ? 'Опишите что на аудиозаписи...' :
+                  fileWithText.messageType === 'video' ? 'Опишите что на видео...' :
+                  fileWithText.messageType === 'image' ? 'Опишите что на изображении...' :
+                  'Введите описание файла...'
+                }
+                style={{
+                  width: '100%',
+                  minHeight: '80px',
+                  padding: '10px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                  fontSize: '14px'
+                }}
+                autoFocus
+              />
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                {fileWithText.text.length}/500 символов
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => {
+                  setFileWithText(prev => prev ? { ...prev, text: '' } : null);
+                  setTimeout(() => handleFileWithTextSubmit(), 0);
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+                title="Отправить только файл без описания"
+              >
+                Без описания
+              </button>
+              
+              <button
+                onClick={() => setFileWithText(null)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Отмена
+              </button>
+              
+              <button
+                onClick={handleFileWithTextSubmit}
+                disabled={fileWithText.text.length > 500}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: fileWithText.text.length > 500 ? '#ccc' : '#0070f3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: fileWithText.text.length > 500 ? 'not-allowed' : 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Отправить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно для редактирования текста файла */}
+      {editingFileMessage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0' }}>Редактирование описания</h3>
+            
+            <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px' }}>
+              <div><strong>Файл:</strong> {editingFileMessage.fileInfo.file_name}</div>
+              <div><strong>Тип:</strong> {
+                editingFileMessage.fileInfo.message_type === 'image' ? '🖼️ Изображение' :
+                editingFileMessage.fileInfo.message_type === 'video' ? '🎥 Видео' :
+                editingFileMessage.fileInfo.message_type === 'audio' ? '🎵 Аудио' : '📎 Файл'
+              }</div>
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                💡 Чтобы удалить описание, очистите поле и нажмите "Сохранить"
+              </div>
+            </div>
+            
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Описание:
+              </label>
+              <textarea
+                value={editingFileMessage.currentText}
+                onChange={(e) => setEditingFileMessage(prev => prev ? { ...prev, currentText: e.target.value } : null)}
+                placeholder="Введите описание..."
+                style={{
+                  width: '100%',
+                  minHeight: '80px',
+                  padding: '10px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                  fontSize: '14px'
+                }}
+                autoFocus
+              />
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                {editingFileMessage.currentText.length}/500 символов • 
+                {editingFileMessage.currentText.trim() === '' ? ' ⚠️ Описание будет удалено' : ' ✓ Текст будет сохранен'}
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setEditingFileMessage(null)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Отмена
+              </button>
+              
+              <button
+                onClick={() => {
+                  setEditingFileMessage(prev => prev ? { ...prev, currentText: '' } : null);
+                  setTimeout(() => handleEditFileMessage(editingFileMessage.messageId, ''), 0);
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+                title="Удалить описание файла"
+              >
+                Удалить описание
+              </button>
+              
+              <button
+                onClick={() => handleEditFileMessage(editingFileMessage.messageId, editingFileMessage.currentText)}
+                disabled={editingFileMessage.currentText.length > 500}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: editingFileMessage.currentText.length > 500 ? '#ccc' : '#0070f3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: editingFileMessage.currentText.length > 500 ? 'not-allowed' : 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recording Indicator */}
       {recording?.isRecording && (
@@ -1275,6 +1929,28 @@ export default function ChatPage() {
               }
             }}
           />
+
+          {/* Code Editor Button */}
+          <button
+            onClick={() => setShowCodeEditor(true)}
+            style={{
+              padding: '10px',
+              backgroundColor: '#f5f5f5',
+              border: 'none',
+              borderRadius: '50%',
+              cursor: 'pointer',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '14px',
+              fontWeight: 'bold'
+            }}
+            title="Вставить код"
+          >
+            {'</>'}
+          </button>
 
           {/* Emoji Button */}
           <div style={{ position: 'relative' }}>
